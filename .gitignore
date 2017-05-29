@@ -1,0 +1,21 @@
+*.o
+*.[Oo]bj
+
+*.log
+*.tlog
+*.lastbuildstate
+*.ilk
+*.pdb
+*.idb
+*.sdf
+*.vcxproj.filters
+
+.vs/
+[Dd]ebug/
+[Rr]elease/
+
+.svn
+
+# Temp Files
+~$*
+MemoryManager.exe
