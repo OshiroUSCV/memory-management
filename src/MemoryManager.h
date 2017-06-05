@@ -101,4 +101,13 @@ protected:
 	MemoryBlockD1* CreateMemoryBlock(void* pAddr, uint sizeBytes);
 	void InsertMemoryBlock(MemoryBlockD1* pBlockM, MemoryBlockD1* pBlockL, MemoryBlockD1* pBlockR);
 	bool TryCoalesceBlocks(MemoryBlockD1* pBlockL, MemoryBlockD1* pBlockR);
+
+	bool IsValidAddress(void* pAddr);
+
+// Debug Functions
+public:
+	// Print + validate Empty Memory linked list
+	void PrintMemoryBlock(MemoryBlockD1* pBlock) const;
+	void VerifyAvailableMemoryList() const;
+	
 };

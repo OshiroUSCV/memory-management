@@ -1,6 +1,9 @@
 #include "MemoryManager.h"
 
 #include <assert.h>
+#include <algorithm>
+#include <cstring>
+#include <climits>
 
 MemoryAllocator::MemoryAllocator()
 {
@@ -181,13 +184,123 @@ bool MemoryManagerD1::AllocateMemoryPool(uint memBytes)
 		CreateMemoryBlock(mp_pool, memBytes);
 	}
 
-	return mp_pool;
+	return (mp_pool != nullptr);
 }
 
 void MemoryManagerD1::ReleaseMemory()
 {
 	delete[] mp_pool;
 	mp_pool = nullptr;
+}
+
+void* MemoryManagerD1::Allocate(uint sizeBytes)
+{
+	assert(sizeBytes > 0);
+
+	// Increment the requested size to accommodate the allocated block size
+	uint size_total = std::max(sizeBytes + sizeof(uint), sizeof(MemoryBlockD1));
+
+	/////////////////////////////////////////////
+	// Search list for smallest valid block
+
+	// Define initial "best fit"
+	MemoryBlockD1* p_block_best = nullptr;
+	uint size_best				= UINT_MAX;
+
+	MemoryBlockD1* p_block_curr = mp_listStart;
+	while (p_block_curr)
+	{
+		uint size_curr = p_block_curr->m_sizeBytes;
+		if (size_curr >= size_total && size_curr < size_best)
+		{
+			p_block_best = p_block_curr;
+			size_best = size_curr;
+		}
+		p_block_curr = p_block_curr->mp_blockNext;
+	}
+	/////////////////////////////////////////////
+
+	void* p_block_alloc = nullptr;
+	// Allocate memory + split empty memory block
+	if (p_block_best)
+	{
+		// Define parameters of allocated block
+		p_block_alloc	= p_block_best;
+		uint size_alloc	= size_total;
+
+		// If we don't have enough leftover memory to create a new empty memory block, use all the space
+		if (size_best - size_total < sizeof(MemoryBlockD1))
+		{
+			size_alloc = size_best;
+		}
+
+		//////////////////////////////////////////
+		// Remove selected block from the list
+		MemoryBlockD1* p_block_L = p_block_best->mp_blockPrev;
+		MemoryBlockD1* p_block_R = p_block_best->mp_blockNext;
+		// Case: Middle of List
+		if (p_block_L && p_block_R)
+		{
+			p_block_L->mp_blockNext = p_block_R;
+			p_block_R->mp_blockNext = p_block_L;
+		}
+		// Case: Rightmost Block
+		else
+		if (p_block_L)
+		{
+			p_block_L->mp_blockNext = nullptr;
+		}
+		// Case: Leftmost Block
+		else
+		if (p_block_R)
+		{
+			mp_listStart = p_block_R;
+		}
+		// Case: Only entry in list
+		else 
+		{
+			mp_listStart = nullptr;
+		}
+		//////////////////////////////////////////
+
+		// Finally, create new empty block w/ remaining memory if necessary
+		if (size_alloc < size_best)
+		{
+			void* p_block_new	= (void*)((uchar*)p_block_best + size_total);
+			uint size_new		= size_best - size_total;
+			CreateMemoryBlock(p_block_new, size_new);
+		}
+
+		// Store updated size for allocated block
+		((MemoryBlockD1*)p_block_alloc)->m_sizeBytes = size_alloc;
+	}
+	else
+	{
+		assert(false); // :TODO: Change to warning?
+	}
+
+
+	// DEBUG
+	VerifyAvailableMemoryList();
+
+	// Return pointer to start of the usable memory block (step past the block size)
+	return (p_block_alloc ? (void*)((uint*)p_block_alloc + 1) : nullptr);
+}
+
+void MemoryManagerD1::Deallocate(void* pMem)
+{
+	// Check if address lies within our memory block
+	assert(IsValidAddress(pMem));
+	
+	// Retrieve size
+	void* p_block_start	= (void*)((uint*)pMem - 1);
+	uint bytes_freed	= *((uint*)p_block_start);
+
+	// Create new empty memory block
+	CreateMemoryBlock(p_block_start, bytes_freed);
+
+	// DEBUG
+	VerifyAvailableMemoryList();
 }
 
 MemoryManagerD1::MemoryBlockD1* MemoryManagerD1::CreateMemoryBlock(void* pAddr, uint sizeBytes)
@@ -205,24 +318,26 @@ MemoryManagerD1::MemoryBlockD1* MemoryManagerD1::CreateMemoryBlock(void* pAddr, 
 	{
 		mp_listStart = p_block;
 	}
-
-	MemoryBlockD1* p_block_curr = mp_listStart;
-	MemoryBlockD1* p_block_prev = nullptr;
-	while (p_block_curr)
+	else
 	{
-		// Bail out if we've reached the end or if we've found our spot
-		if (p_block_curr->mp_blockNext == nullptr || p_block > p_block_curr->mp_blockNext)
+		MemoryBlockD1* p_block_curr = mp_listStart;
+		MemoryBlockD1* p_block_prev = nullptr;
+		while (p_block_curr)
 		{
-			break;
+			// Bail out if we've reached the end or if we've found our spot
+			if (p_block_curr->mp_blockNext == nullptr || p_block > p_block_curr->mp_blockNext)
+			{
+				break;
+			}
+
+			// Advance
+			p_block_prev = p_block_curr;
+			p_block_curr = p_block_curr->mp_blockNext;
 		}
 
-		// Advance
-		p_block_prev = p_block_curr;
-		p_block_curr = mp_listStart->mp_blockNext;
+		// Connect Memory Blocks
+		InsertMemoryBlock(p_block, p_block_prev, p_block_curr);
 	}
-
-	// Connect Memory Blocks
-	InsertMemoryBlock(p_block, p_block_prev, p_block_curr);
 
 	return p_block;
 }
@@ -231,29 +346,94 @@ void MemoryManagerD1::InsertMemoryBlock(MemoryBlockD1* pBlockM, MemoryBlockD1* p
 {
 	assert(pBlockM);
 
+	// Right Block
+	if (pBlockR)
+	{
+		pBlockM->mp_blockNext = pBlockR;
+		pBlockR->mp_blockPrev = pBlockM;
+
+		TryCoalesceBlocks(pBlockM, pBlockR);
+	}
+
 	// Left Block
 	if (pBlockL)
 	{
 		pBlockM->mp_blockPrev = pBlockL;
 		pBlockL->mp_blockNext = pBlockM;
-	}
 
-	// Right Block
-	if (pBlockR)
+		TryCoalesceBlocks(pBlockL, pBlockM);
+	}
+	else
 	{
-		pBlockM->mp_blockNext = pBlockR;
-		pBlockR->mp_blockPrev = pBlockL;
+		// Update list start if no left block exists
+		mp_listStart = pBlockM;
 	}
 }
 
 bool MemoryManagerD1::TryCoalesceBlocks(MemoryBlockD1* pBlockL, MemoryBlockD1* pBlockR)
 {
-	// Bail out if we don't have 2 valid blocks
-	if (!pBlockL || !pBlockR)
+	// Bail out if we don't have 2 valid linked blocks blocks
+	if (!pBlockL || !pBlockR || pBlockL->mp_blockNext != pBlockR)
 	{
 		return false;
 	}
+
 	// Check if contiguous
+	uint size_l = pBlockL->m_sizeBytes;
 
+	// Not contiguous: Bail out
+	if ((uchar*)pBlockL + size_l != (uchar*)pBlockR)
+	{
+		return false;
+	}
 
+	// Contiguous: Merge right block into the left block
+	pBlockL->m_sizeBytes += pBlockR->m_sizeBytes;
+	pBlockL->mp_blockNext = pBlockR->mp_blockNext;
+	// :TODO: Relink BlockR's next block's prev to BlockL
+
+	return true;
+}
+
+bool MemoryManagerD1::IsValidAddress(void* pAddr)
+{
+	// Null: Clearly not valid
+	if (!pAddr)
+	{
+		return false;
+	}
+
+	// Verify address lies within our memory pool
+	uchar* p_addr = (uchar*)pAddr;
+	return (mp_pool <= p_addr && p_addr < mp_pool + m_poolSizeBytes);
+}
+
+//////////////////////////////////////////////////////////////////////
+// DEBUG
+void MemoryManagerD1::PrintMemoryBlock(MemoryBlockD1* pBlock) const
+{
+	printf("Block Addr: %p\n", pBlock);
+	printf("Block Size: %d bytes\n", pBlock->m_sizeBytes);
+}
+
+void MemoryManagerD1::VerifyAvailableMemoryList() const
+{
+	printf("========== LIST VALIDATION ==========\n");
+	MemoryBlockD1* p_block_curr = mp_listStart;
+	MemoryBlockD1* p_block_prev = nullptr;
+	while (p_block_curr)
+	{
+		printf("[][][]\n");
+		PrintMemoryBlock(p_block_curr);
+		if (p_block_curr->mp_blockPrev != p_block_prev)
+		{
+			printf("WARNING! This block does not link back to the previous block!\n");
+		}
+		printf("[][][]\n");
+
+		// Advance list
+		p_block_prev = p_block_curr;
+		p_block_curr = p_block_curr->mp_blockNext;
+	}
+	printf("========== LIST END ==========\n\n");
 }
