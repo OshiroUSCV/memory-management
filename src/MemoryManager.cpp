@@ -389,8 +389,13 @@ bool MemoryManagerD1::TryCoalesceBlocks(MemoryBlockD1* pBlockL, MemoryBlockD1* p
 
 	// Contiguous: Merge right block into the left block
 	pBlockL->m_sizeBytes += pBlockR->m_sizeBytes;
-	pBlockL->mp_blockNext = pBlockR->mp_blockNext;
-	// :TODO: Relink BlockR's next block's prev to BlockL
+
+	MemoryBlockD1* p_block_next = pBlockR->mp_blockNext;
+	pBlockL->mp_blockNext = p_block_next;
+	if (p_block_next)
+	{
+		p_block_next->mp_blockPrev = pBlockL;
+	}
 
 	return true;
 }
