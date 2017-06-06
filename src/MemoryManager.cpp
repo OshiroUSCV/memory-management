@@ -200,7 +200,16 @@ void* MemoryManagerD1::Allocate(uint sizeBytes)
 	assert(sizeBytes > 0);
 
 	// Calculate the actual block size requested, and make sure it is of the minimum size
-	uint size_total = std::max(sizeBytes + sizeof(uint), sizeof(MemoryBlockD1));
+	uint size_meta_l = sizeof(uint);	// Need an extra bit of space for the size tracker.
+	uint size_meta_r = 0;
+
+#if defined MEMORY_DEBUG_VERIFY
+	// Need space for the front and back data buffer
+	size_meta_l += sizeof(PATTERN_BUFFER);
+	size_meta_r += sizeof(PATTERN_BUFFER);
+#endif
+
+	uint size_total = std::max(sizeBytes + size_meta_l + size_meta_r, sizeof(MemoryBlockD1));
 
 	/////////////////////////////////////////////
 	// Search list for smallest valid block
@@ -278,7 +287,9 @@ void* MemoryManagerD1::Allocate(uint sizeBytes)
 
 #if defined MEMORY_DEBUG_VERIFY
 		// Fill allocated memory with debug pattern
-		memset(((uint*)p_block_alloc + 1), PATTERN_ALLOC, size_alloc - sizeof(uint));
+		*((uint*)p_block_alloc + 1) = PATTERN_BUFFER;												// Buffer: Front
+		memset(((uint*)p_block_alloc + 2), PATTERN_ALLOC, size_alloc - size_meta_l - size_meta_r);	// User memory
+		*(uint*)((uchar*)p_block_alloc + size_alloc - size_meta_r) = PATTERN_BUFFER;				// Buffer: Rear
 #endif
 	}
 	else
@@ -290,7 +301,7 @@ void* MemoryManagerD1::Allocate(uint sizeBytes)
 	VerifyAvailableMemoryList();
 
 	// Return pointer to start of the usable memory block (step past the block size)
-	return (p_block_alloc ? (void*)((uint*)p_block_alloc + 1) : nullptr);
+	return (p_block_alloc ? (void*)((uchar*)p_block_alloc + size_meta_l) : nullptr);
 }
 
 void MemoryManagerD1::Deallocate(void* pMem)
@@ -467,19 +478,74 @@ void MemoryManagerD1::VerifyAvailableMemoryList() const
 	printf("========== LIST VALIDATION ==========\n");
 	MemoryBlockD1* p_block_curr = mp_listStart;
 	MemoryBlockD1* p_block_prev = nullptr;
-	while (p_block_curr)
-	{
-		printf("[][][]\n");
-		PrintMemoryBlock(p_block_curr);
-		if (p_block_curr->mp_blockPrev != p_block_prev)
-		{
-			printf("WARNING! This block does not link back to the previous block!\n");
-		}
-		printf("[][][]\n");
+	//while (p_block_curr)
+	//{
+	//	printf("[][][]\n");
+	//	PrintMemoryBlock(p_block_curr);
 
-		// Advance list
-		p_block_prev = p_block_curr;
-		p_block_curr = p_block_curr->mp_blockNext;
+	//	// Check: Ascending value
+	//	if (p_block_prev > p_block_curr)
+	//	{
+	//		printf("WARNING! Linked list is not strictly increasing!\n");
+	//	}
+
+	//	// Check: Doubly-Linked Lists strongly connected
+	//	if (p_block_curr->mp_blockPrev != p_block_prev)
+	//	{
+	//		printf("WARNING! This block does not link back to the previous block!\n");
+	//	}
+	//	printf("[][][]\n");
+
+	//	// Advance list
+	//	p_block_prev = p_block_curr;
+	//	p_block_curr = p_block_curr->mp_blockNext;
+	//}
+
+	// Alternate Loop
+	void* p_addr_curr	= mp_pool;
+	void* p_addr_end	= mp_pool + m_poolSizeBytes;
+	p_block_curr		= mp_listStart;
+
+	while (p_addr_curr < p_addr_end)
+	{
+		// Retrieve size
+		uint size_curr = *(uint*)p_addr_curr;
+
+		// Case: Empty Block
+		if (p_addr_curr == p_block_curr)
+		{
+			printf("[0][0][0][0][0]\n");
+			PrintMemoryBlock(p_block_curr);
+			printf("[0][0][0][0][0]\n");
+
+			// Advance to next empty block
+			p_block_curr = p_block_curr->mp_blockNext;
+		}
+		// Case: Allocated Block
+		else
+		{
+			printf("[1][1][1][1][1]\n");
+			printf("Size: %d\n", size_curr);
+
+#if defined MEMORY_DEBUG_VERIFY
+			// Check: Data Buffers
+			uint* p_buffer_l = (uint*)p_addr_curr + 1;
+			uint* p_buffer_r = (uint*)((uchar*)p_addr_curr + size_curr - sizeof(uint));
+			if (*p_buffer_l != PATTERN_BUFFER)
+			{
+				printf("WARNING! Left buffer compromised! (%p)\n", p_buffer_l);
+				assert(false);
+			}
+			if (*p_buffer_r != PATTERN_BUFFER)
+			{
+				printf("WARNING! Right buffer compromised! (%p)\n", p_buffer_r);
+				assert(false);
+			}
+#endif
+			printf("[1][1][1][1][1]\n");	
+		}
+
+		p_addr_curr = ((uchar*)p_addr_curr) + size_curr;
 	}
 	printf("========== LIST END ==========\n\n");
 }

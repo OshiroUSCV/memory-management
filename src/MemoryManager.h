@@ -5,12 +5,16 @@ typedef unsigned char uchar;
 
 #define BYTE_ALIGNMENT	(8)	// 64-bit alignment (8 bytes)
 
+// ##########################################
+#define MEMORY_DEBUG_VERIFY
 
-#define MEMORY_DEBUG_VERIFY 
+#if defined MEMORY_DEBUG_VERIFY
 // Memory Verification Keys
 static const uchar PATTERN_ALLOC	= 0xFA;
 static const uchar PATTERN_FREE		= 0xFE;
-// PATTERN_BUFFER CAFECAFE DECAFBAD 0xDEADBEEF
+static const uint  PATTERN_BUFFER	= 0xDEADBEEF; // PATTERN_BUFFER CAFECAFE DECAFBAD 0xDEADBEEF
+#endif
+// ##########################################
 
 /**
  * CLASS: Fixed-size memory allocator

@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <cstring>
 
 #include "MemoryManager.h"
 
@@ -13,6 +14,11 @@ int main()
 	void* p_block_1 = mem_pool.Allocate(64);
 	void* p_block_2 = mem_pool.Allocate(1024);
 	void* p_block_3 = mem_pool.Allocate(520);
+
+	memset(p_block_1, 0x0C, 64);
+	mem_pool.VerifyAvailableMemoryList();
+	memset(p_block_2, 0xFF, 1025);
+	mem_pool.VerifyAvailableMemoryList();
 
 	mem_pool.Deallocate(p_block_2);
 	p_block_2 = mem_pool.Allocate(128);
