@@ -184,6 +184,8 @@ bool MemoryManagerD1::AllocateMemoryPool(uint memBytes)
 		CreateMemoryBlock(mp_pool, memBytes);
 	}
 
+	VerifyAvailableMemoryList();
+
 	return (mp_pool != nullptr);
 }
 
@@ -197,7 +199,7 @@ void* MemoryManagerD1::Allocate(uint sizeBytes)
 {
 	assert(sizeBytes > 0);
 
-	// Increment the requested size to accommodate the allocated block size
+	// Calculate the actual block size requested, and make sure it is of the minimum size
 	uint size_total = std::max(sizeBytes + sizeof(uint), sizeof(MemoryBlockD1));
 
 	/////////////////////////////////////////////
@@ -273,12 +275,16 @@ void* MemoryManagerD1::Allocate(uint sizeBytes)
 
 		// Store updated size for allocated block
 		((MemoryBlockD1*)p_block_alloc)->m_sizeBytes = size_alloc;
+
+#if defined MEMORY_DEBUG_VERIFY
+		// Fill allocated memory with debug pattern
+		memset(((uint*)p_block_alloc + 1), PATTERN_ALLOC, size_alloc - sizeof(uint));
+#endif
 	}
 	else
 	{
 		assert(false); // :TODO: Change to warning?
 	}
-
 
 	// DEBUG
 	VerifyAvailableMemoryList();
@@ -294,15 +300,26 @@ void MemoryManagerD1::Deallocate(void* pMem)
 	
 	// Retrieve size
 	void* p_block_start	= (void*)((uint*)pMem - 1);
-	uint bytes_freed	= *((uint*)p_block_start);
+	uint block_size		= *((uint*)p_block_start);
 
 	// Create new empty memory block
-	CreateMemoryBlock(p_block_start, bytes_freed);
+	MemoryBlockD1* p_block = CreateMemoryBlock(p_block_start, block_size);
+
+#if defined MEMORY_DEBUG_VERIFY
+	// After newly-freed block is created, set verification pattern
+	memset((void*)(p_block + 1), PATTERN_FREE, p_block->m_sizeBytes - sizeof(MemoryBlockD1));
+#endif
 
 	// DEBUG
 	VerifyAvailableMemoryList();
 }
 
+/**
+**	Create an EMPTY memory block.
+**	@param pAddr		Pointer to the start of the memory block
+**	@param sizeBytes	Total size of free space available at pAddr
+**						NOTE: This is NOT the amount of space available for allocation
+ */
 MemoryManagerD1::MemoryBlockD1* MemoryManagerD1::CreateMemoryBlock(void* pAddr, uint sizeBytes)
 {
 	// Typecast & Initialize
@@ -311,6 +328,8 @@ MemoryManagerD1::MemoryBlockD1* MemoryManagerD1::CreateMemoryBlock(void* pAddr, 
 	p_block->mp_blockPrev = nullptr;
 	p_block->mp_blockNext = nullptr;
 
+	MemoryBlockD1* p_block_inserted = p_block;
+
 	/////////////////////////
 	// Insert into list
 	// Case: Empty List
@@ -318,6 +337,13 @@ MemoryManagerD1::MemoryBlockD1* MemoryManagerD1::CreateMemoryBlock(void* pAddr, 
 	{
 		mp_listStart = p_block;
 	}
+	// Case: Front of List
+	else
+	if (p_block < mp_listStart)
+	{
+		p_block_inserted = InsertMemoryBlock(p_block, nullptr,mp_listStart);
+	}
+	// Case: Not Front of List
 	else
 	{
 		MemoryBlockD1* p_block_curr = mp_listStart;
@@ -336,15 +362,25 @@ MemoryManagerD1::MemoryBlockD1* MemoryManagerD1::CreateMemoryBlock(void* pAddr, 
 		}
 
 		// Connect Memory Blocks
-		InsertMemoryBlock(p_block, p_block_prev, p_block_curr);
+		p_block_inserted = InsertMemoryBlock(p_block, p_block_prev, p_block_curr);
 	}
 
-	return p_block;
+	return p_block_inserted;
 }
 
-void MemoryManagerD1::InsertMemoryBlock(MemoryBlockD1* pBlockM, MemoryBlockD1* pBlockL, MemoryBlockD1* pBlockR)
+/**
+ *	Inserts BlockM into list between BlockL & BlockR. 
+ *	Merges blocks when contiguous.
+ *
+ *	@return pointer to the block that BlockM is a part of at the end of the insertion.
+ *	This is BlockM unless BlockM is merged into BlockL, in which case we return BlockL.
+ */
+MemoryManagerD1::MemoryBlockD1* MemoryManagerD1::InsertMemoryBlock(MemoryBlockD1* pBlockM, MemoryBlockD1* pBlockL, MemoryBlockD1* pBlockR)
 {
 	assert(pBlockM);
+
+	// Return value
+	MemoryBlockD1* p_block = pBlockM;
 
 	// Right Block
 	if (pBlockR)
@@ -361,13 +397,18 @@ void MemoryManagerD1::InsertMemoryBlock(MemoryBlockD1* pBlockM, MemoryBlockD1* p
 		pBlockM->mp_blockPrev = pBlockL;
 		pBlockL->mp_blockNext = pBlockM;
 
-		TryCoalesceBlocks(pBlockL, pBlockM);
+		if (TryCoalesceBlocks(pBlockL, pBlockM))
+		{
+			p_block = pBlockL;
+		}
 	}
 	else
 	{
 		// Update list start if no left block exists
 		mp_listStart = pBlockM;
 	}
+
+	return p_block;
 }
 
 bool MemoryManagerD1::TryCoalesceBlocks(MemoryBlockD1* pBlockL, MemoryBlockD1* pBlockR)

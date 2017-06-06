@@ -1,9 +1,16 @@
-
 // Basic type defines
 typedef unsigned int uint;
 typedef unsigned char uchar;
 
+
 #define BYTE_ALIGNMENT	(8)	// 64-bit alignment (8 bytes)
+
+
+#define MEMORY_DEBUG_VERIFY 
+// Memory Verification Keys
+static const uchar PATTERN_ALLOC	= 0xFA;
+static const uchar PATTERN_FREE		= 0xFE;
+// PATTERN_BUFFER CAFECAFE DECAFBAD 0xDEADBEEF
 
 /**
  * CLASS: Fixed-size memory allocator
@@ -71,8 +78,12 @@ protected:
 	struct MemoryBlockD1
 	{
 		uint m_sizeBytes;				// Size of this empty memory block (bytes)
+										// This INCLUDES the space taken up by the MemoryBlockD1 struct itself.
+										// When being used for the size of the allocated memory block, it INCLUDES
+										// the size of the unsigned integer storage.
+										// In other words, it is the offset to the end of the block.
 		MemoryBlockD1* mp_blockPrev;	// Pointer to previous sequential empty memory block
-		MemoryBlockD1* mp_blockNext;				// Pointer to next sequential empty memory block
+		MemoryBlockD1* mp_blockNext;	// Pointer to next sequential empty memory block
 	};
 
 	uint m_poolSizeBytes;	// Size of memory pool (Bytes)
@@ -99,7 +110,7 @@ public:
 // Helper functions
 protected:
 	MemoryBlockD1* CreateMemoryBlock(void* pAddr, uint sizeBytes);
-	void InsertMemoryBlock(MemoryBlockD1* pBlockM, MemoryBlockD1* pBlockL, MemoryBlockD1* pBlockR);
+	MemoryBlockD1* InsertMemoryBlock(MemoryBlockD1* pBlockM, MemoryBlockD1* pBlockL, MemoryBlockD1* pBlockR);
 	bool TryCoalesceBlocks(MemoryBlockD1* pBlockL, MemoryBlockD1* pBlockR);
 
 	bool IsValidAddress(void* pAddr);

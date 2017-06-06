@@ -9,12 +9,14 @@ int main()
 	MemoryManagerD1 mem_pool;
 	mem_pool.AllocateMemoryPool(4096);	
 
-	void* p_block_1 = mem_pool.Allocate(512);
-	void* p_block_2 = mem_pool.Allocate(128);
+	
+	void* p_block_1 = mem_pool.Allocate(64);
+	void* p_block_2 = mem_pool.Allocate(1024);
 	void* p_block_3 = mem_pool.Allocate(520);
 
 	mem_pool.Deallocate(p_block_2);
-	mem_pool.Deallocate(p_block_3);
+	p_block_2 = mem_pool.Allocate(128);
+	mem_pool.Deallocate(p_block_1);
 
 
 	//mem_pool.AllocateMemory(20, 64);	// Request 64 20-byte blocks (should be rounded up to 24)
